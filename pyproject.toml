@@ -26,4 +26,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-televuer = ["diagnostics.html"]
+televuer = ["diagnostics.html", "client_diagnostics.js"]

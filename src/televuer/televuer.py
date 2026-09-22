@@ -7,6 +7,9 @@ import threading
 import cv2
 from aiohttp import web
 import os
+import json
+import logging
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -90,6 +93,9 @@ class TeleVuer:
                     key_file = key_file or str(current_module_dir / "key.pem")
 
         self.vuer = Vuer(host='0.0.0.0', cert=cert_file, key=key_file, queries=dict(grid=False), queue_len=3)
+        self.vuer.app.router.add_get('/xr', self._xr_diagnostics_page)
+        self.vuer.app.router.add_get('/diagnostics/client.js', self._client_diagnostics_script)
+        self.vuer.app.router.add_post('/diagnostics/client', self._client_diagnostics_report)
         self.vuer.app.router.add_get('/diagnostics', self._diagnostics_page)
         self.vuer.app.router.add_get('/diagnostics/frame.jpg', self._diagnostics_frame)
         self.vuer.add_handler("CAMERA_MOVE")(self.on_cam_move)
@@ -142,6 +148,8 @@ class TeleVuer:
         self.left_arm_pose_shared = Array('d', 16, lock=True)
         self.right_arm_pose_shared = Array('d', 16, lock=True)
         self.motion_data_ready_shared = Value('b', False, lock=True)
+        self.controller_events_shared = Value('L', 0, lock=True)
+        self.controller_time_shared = Value('d', 0.0, lock=True)
         if self.use_hand_tracking:
             self.left_hand_position_shared = Array('d', 75, lock=True)
             self.right_hand_position_shared = Array('d', 75, lock=True)
@@ -180,6 +188,33 @@ class TeleVuer:
         self.process.daemon = True
         self.process.start()
     
+    async def _xr_diagnostics_page(self, request: web.Request) -> web.Response:
+        html = (self.vuer.client_root / 'index.html').read_text(encoding='utf-8')
+        html = html.replace('<head>', '<head><script src="/diagnostics/client.js"></script>', 1)
+        return web.Response(text=html, content_type='text/html', headers={'Cache-Control': 'no-store'})
+
+    async def _client_diagnostics_script(self, request: web.Request) -> web.Response:
+        script = Path(__file__).with_name('client_diagnostics.js').read_text(encoding='utf-8')
+        return web.Response(text=script, content_type='application/javascript',
+                            headers={'Cache-Control': 'no-store'})
+
+    async def _client_diagnostics_report(self, request: web.Request) -> web.Response:
+        # Bound the body before parsing: this endpoint is reachable on the LAN.
+        body = bytearray()
+        async for chunk in request.content.iter_chunked(1024):
+            body.extend(chunk)
+            if len(body) > 8192:
+                raise web.HTTPRequestEntityTooLarge(max_size=8192, actual_size=len(body))
+        try:
+            report = json.loads(body)
+        except (ValueError, UnicodeDecodeError):
+            raise web.HTTPBadRequest(text='Expected JSON') from None
+        if not isinstance(report, dict):
+            raise web.HTTPBadRequest(text='Expected an object')
+        logging.getLogger(__name__).info('PICO browser peer=%s %s', request.remote,
+                                         json.dumps(report, ensure_ascii=True))
+        return web.Response(status=204)
+
     async def _diagnostics_page(self, request: web.Request) -> web.Response:
         html = Path(__file__).with_name('diagnostics.html').read_text(encoding='utf-8')
         return web.Response(text=html, content_type='text/html', headers={'Cache-Control': 'no-store'})
@@ -281,6 +316,10 @@ class TeleVuer:
 
             extract_controllers(left_controller, "left")
             extract_controllers(right_controller, "right")
+            with self.controller_events_shared.get_lock():
+                self.controller_events_shared.value += 1
+            with self.controller_time_shared.get_lock():
+                self.controller_time_shared.value = time.monotonic()
             with self.motion_data_ready_shared.get_lock():
                 self.motion_data_ready_shared.value = True
         except:
@@ -582,7 +621,7 @@ class TeleVuer:
                 to="bgChildren",
             )
 
-        while True:
+        while session.CURRENT_WS_ID in self.vuer.ws:
             session.upsert(
                 [
                     ImageBackground(

@@ -63,6 +63,15 @@ no controller input and does not request an XR session. The snapshots are not a
 freshness or safety monitor; WebRTC-only/pass-through configurations have no
 local image buffer and return HTTP 503 for the snapshot endpoint.
 
+For freezes **after entering VR**, use
+`https://<host>:8012/xr?ws=wss://<host>:8012`. This opt-in page uses the same
+Vuer client, with local browser telemetry: XR session start/end/failure, actual
+XR render callbacks, WebSocket message counts/age, JavaScript errors, and WebGL
+context loss. Records appear as `PICO browser peer=...` in the server log.
+It does not log images or pose payloads. A browser/main-thread crash or network
+failure can also prevent telemetry delivery; missing heartbeats alone do not
+identify the cause. The ordinary `/` entry point remains uninstrumented.
+
 ## 2. 📦 Install
 
 ### 2.1 📥 Install televuer repository

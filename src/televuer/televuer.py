@@ -5,6 +5,7 @@ import numpy as np
 import asyncio
 import threading
 import cv2
+from aiohttp import web
 import os
 from pathlib import Path
 from typing import Literal
@@ -89,6 +90,8 @@ class TeleVuer:
                     key_file = key_file or str(current_module_dir / "key.pem")
 
         self.vuer = Vuer(host='0.0.0.0', cert=cert_file, key=key_file, queries=dict(grid=False), queue_len=3)
+        self.vuer.app.router.add_get('/diagnostics', self._diagnostics_page)
+        self.vuer.app.router.add_get('/diagnostics/frame.jpg', self._diagnostics_frame)
         self.vuer.add_handler("CAMERA_MOVE")(self.on_cam_move)
         if self.use_hand_tracking:
             self.vuer.add_handler("HAND_MOVE")(self.on_hand_move)
@@ -177,6 +180,22 @@ class TeleVuer:
         self.process.daemon = True
         self.process.start()
     
+    async def _diagnostics_page(self, request: web.Request) -> web.Response:
+        html = Path(__file__).with_name('diagnostics.html').read_text(encoding='utf-8')
+        return web.Response(text=html, content_type='text/html', headers={'Cache-Control': 'no-store'})
+
+    async def _diagnostics_frame(self, request: web.Request) -> web.Response:
+        if not hasattr(self, 'img2display'):
+            return web.Response(status=503, text='No local ZMQ image buffer')
+        # The shared image is RGB; JPEG encoding expects BGR. This is a display
+        # diagnostic only, not a frame-freshness or robot-safety check.
+        frame = cv2.cvtColor(self.img2display.copy(), cv2.COLOR_RGB2BGR)
+        ok, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+        if not ok:
+            return web.Response(status=500, text='JPEG encoding failed')
+        return web.Response(body=jpeg.tobytes(), content_type='image/jpeg',
+                            headers={'Cache-Control': 'no-store'})
+
     def _vuer_run(self):
         try:
             self.vuer.run()

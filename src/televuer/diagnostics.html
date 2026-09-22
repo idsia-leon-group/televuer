@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PICO XR 诊断</title>
+<style>
+body { background: #eee; color: #111; font: 20px sans-serif; margin: 24px; }
+a { display: inline-block; padding: 16px; background: #075ca8; color: white; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; background: white; padding: 16px; }
+img { display: block; width: min(100%, 960px); min-height: 100px; background: #ccc; }
+</style>
+</head>
+<body>
+<h1>PICO 浏览器诊断（不发送控制输入）</h1>
+<p>下方是普通 JPEG 图片，不依赖 WebGL 或 XR。请截图保留检测结果。</p>
+<a id="open-xr">打开 XR 页面</a>
+<pre id="report">JavaScript 尚未执行……</pre>
+<p id="image-status">正在请求相机图片……</p>
+<img id="camera" alt="相机 JPEG 图片">
+<script>
+const report = document.querySelector('#report');
+const imageStatus = document.querySelector('#image-status');
+const camera = document.querySelector('#camera');
+const state = { HTTPS: location.protocol === 'https:', secureContext: isSecureContext,
+    WebXR: !!navigator.xr, browser: navigator.userAgent };
+const render = () => { report.textContent = JSON.stringify(state, null, 2); };
+const wsURL = `wss://${location.host}/`;
+document.querySelector('#open-xr').href = `/?ws=${encodeURIComponent(wsURL)}`;
+window.addEventListener('error', event => { state.error = event.message; render(); });
+window.addEventListener('unhandledrejection', event => { state.error = String(event.reason); render(); });
+try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl2');
+    state.WebGL2 = !!gl;
+    if (gl) {
+        state.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+        state.renderer = gl.getParameter(gl.RENDERER);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+    }
+} catch (error) { state.WebGL2 = String(error); }
+render();
+async function checkXR(mode) {
+    try {
+        state[mode] = navigator.xr ? await Promise.race([
+            navigator.xr.isSessionSupported(mode),
+            new Promise(resolve => setTimeout(() => resolve('检测超时'), 4000))
+        ]) : 'WebXR API 不存在';
+    } catch (error) { state[mode] = String(error); }
+    render();
+}
+checkXR('immersive-vr');
+checkXR('immersive-ar');
+const socket = new WebSocket(wsURL);
+const timer = setTimeout(() => { state.WebSocket = '超时'; render(); socket.close(); }, 5000);
+socket.onmessage = () => { clearTimeout(timer); state.WebSocket = '收到服务器数据'; render(); socket.close(); };
+socket.onerror = () => { clearTimeout(timer); state.WebSocket = '连接失败'; render(); };
+let frames = 0;
+camera.onload = () => {
+    imageStatus.textContent = `JPEG 已显示 ${++frames} 帧；尺寸 ${camera.naturalWidth}×${camera.naturalHeight}`;
+    setTimeout(nextFrame, 1000);
+};
+camera.onerror = () => { imageStatus.textContent = 'JPEG 请求失败（无图像缓冲或连接异常）'; setTimeout(nextFrame, 2000); };
+function nextFrame() { camera.src = `/diagnostics/frame.jpg?t=${Date.now()}`; }
+nextFrame();
+</script>
+</body>
+</html>

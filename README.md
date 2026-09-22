@@ -46,6 +46,23 @@ The image input of this library works in conjunction with the [teleimager](https
   </a>
 </p>
 
+## HTTPS asset delivery
+
+This checkout configures `AIOHTTP_NOSENDFILE=1` before importing Vuer. It uses
+aiohttp's buffered file writes instead of the Python 3.10 TLS sendfile path,
+which produced `protocol.resume_writing()` assertions and interrupted JavaScript
+transfers to PICO Browser over a hotspot. This applies to both preview and robot
+teleoperation; it does not disable TLS or certificate verification.
+
+## Browser diagnostics
+
+Open `https://<host>:8012/diagnostics` to check secure context, WebGL2, WebXR
+session support and the WebSocket without relying on the Vuer React/WebGL UI.
+The page also displays JPEG snapshots of the local ZMQ image buffer. It sends
+no controller input and does not request an XR session. The snapshots are not a
+freshness or safety monitor; WebRTC-only/pass-through configurations have no
+local image buffer and return HTTP 503 for the snapshot endpoint.
+
 ## 2. 📦 Install
 
 ### 2.1 📥 Install televuer repository

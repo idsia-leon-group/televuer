@@ -54,6 +54,21 @@ which produced `protocol.resume_writing()` assertions and interrupted JavaScript
 transfers to PICO Browser over a hotspot. This applies to both preview and robot
 teleoperation; it does not disable TLS or certificate verification.
 
+Frontend JS/CSS/JSON/SVG assets now negotiate HTTP compression and advertise
+`Vary: Accept-Encoding`. Reading files and compressing large responses run off
+the event loop so initial page loading does not block controller WebSocket
+handling. Asset URLs and decoded bytes are unchanged; browsers can cache them
+for one hour. Both `/` and `/xr` use these assets. No controller inputs or control
+gates are changed.
+
+Run the HTTP transport tests in an environment with this package installed:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+The tests use only loopback HTTP with temporary assets, not robot hardware.
+
 ## Browser diagnostics
 
 Open `https://<host>:8012/diagnostics` to check secure context, WebGL2, WebXR
@@ -68,6 +83,8 @@ For freezes **after entering VR**, use
 Vuer client, with local browser telemetry: XR session start/end/failure, actual
 XR render callbacks, WebSocket message counts/age, JavaScript errors, and WebGL
 context loss. Records appear as `PICO browser peer=...` in the server log.
+The HTTP child configures a standard logging handler so these records also reach
+the teleoperation launcher's log when the parent uses `logging_mp`.
 It does not log images or pose payloads. A browser/main-thread crash or network
 failure can also prevent telemetry delivery; missing heartbeats alone do not
 identify the cause. The ordinary `/` entry point remains uninstrumented.

@@ -9,6 +9,7 @@ from aiohttp import web
 import os
 import json
 import logging
+import mimetypes
 import time
 from pathlib import Path
 from typing import Literal
@@ -93,6 +94,8 @@ class TeleVuer:
                     key_file = key_file or str(current_module_dir / "key.pem")
 
         self.vuer = Vuer(host='0.0.0.0', cert=cert_file, key=key_file, queries=dict(grid=False), queue_len=3)
+        # Register before Vuer.run() installs its uncompressed static asset route.
+        self.vuer.app.router.add_get('/assets/{path:.*}', self._client_asset)
         self.vuer.app.router.add_get('/xr', self._xr_diagnostics_page)
         self.vuer.app.router.add_get('/diagnostics/client.js', self._client_diagnostics_script)
         self.vuer.app.router.add_post('/diagnostics/client', self._client_diagnostics_report)
@@ -188,6 +191,24 @@ class TeleVuer:
         self.process.daemon = True
         self.process.start()
     
+    async def _client_asset(self, request: web.Request) -> web.StreamResponse:
+        """Serve frontend text assets compressed without blocking XR event handling."""
+        root = (self.vuer.client_root / 'assets').resolve()
+        path = (root / request.match_info['path']).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise web.HTTPNotFound()
+        if path.suffix not in {'.js', '.css', '.json', '.svg'}:
+            return web.FileResponse(path)
+        content = await asyncio.to_thread(path.read_bytes)
+        response = web.Response(
+            body=content,
+            content_type=mimetypes.guess_type(path.name)[0] or 'application/octet-stream',
+            headers={'Vary': 'Accept-Encoding', 'Cache-Control': 'public, max-age=3600'},
+            zlib_executor_size=16384,
+        )
+        response.enable_compression()
+        return response
+
     async def _xr_diagnostics_page(self, request: web.Request) -> web.Response:
         html = (self.vuer.client_root / 'index.html').read_text(encoding='utf-8')
         html = html.replace('<head>', '<head><script src="/diagnostics/client.js"></script>', 1)
@@ -232,6 +253,9 @@ class TeleVuer:
                             headers={'Cache-Control': 'no-store'})
 
     def _vuer_run(self):
+        # The robot entry point uses logging_mp, not the standard logging setup.
+        # Configure the HTTP child too so /xr telemetry reaches the launcher log.
+        logging.basicConfig(level=logging.INFO)
         try:
             self.vuer.run()
         except KeyboardInterrupt:

@@ -26,7 +26,7 @@ const state = { HTTPS: location.protocol === 'https:', secureContext: isSecureCo
     WebXR: !!navigator.xr, browser: navigator.userAgent };
 const render = () => { report.textContent = JSON.stringify(state, null, 2); };
 const wsURL = `wss://${location.host}/`;
-document.querySelector('#open-xr').href = `/?ws=${encodeURIComponent(wsURL)}`;
+document.querySelector('#open-xr').href = `/xr?ws=${encodeURIComponent(wsURL)}`;
 window.addEventListener('error', event => { state.error = event.message; render(); });
 window.addEventListener('unhandledrejection', event => { state.error = String(event.reason); render(); });
 try {
